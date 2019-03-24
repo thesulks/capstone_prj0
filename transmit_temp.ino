@@ -5,11 +5,19 @@
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
+#include <time.h>
 
 ESP8266WiFiMulti WiFiMulti;
 
 // Data wire is plugged into port D2 on the Arduino
 #define ONE_WIRE_BUS D2
+
+#define TIMEZONE_SEOUL 9
+#define YEAR 0
+#define MONTH 1
+#define DATE 2
+#define HOUR 3
+#define MIN 4
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
@@ -76,17 +84,24 @@ void setup(void)
   Serial.print("Device 0 Resolution: ");
   Serial.print(sensors.getResolution(insideThermometer), DEC); 
   Serial.println();
-/*
-  for (uint8_t t = 4; t > 0; t--) {
-    Serial.printf("[SETUP] WAIT %d...\n", t);
-    Serial.flush();
-    delay(1000);
-  }
-*/
-  Serial.println("*** Connecting ***\n");
+
   WiFi.mode(WIFI_STA);
   WiFiMulti.addAP("iptime_rod", "temppw19");
 
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(1000);
+  }
+  Serial.println("...DONE");
+
+  configTime(TIMEZONE_SEOUL * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.print("Waiting for time");
+  while (!time(nullptr)) {
+    Serial.print(".");
+    delay(1000);
+  }
+  Serial.println("...DONE");
 }
 
 /*
@@ -99,7 +114,29 @@ void loop(void)
     WiFiClient client;
     HTTPClient http;
     float tempC;
-    
+
+    String ymdhm[5];
+    String aws_url = "http://ec2-52-78-98-155.ap-northeast-2.compute.amazonaws.com:9000/";
+    time_t now = time(nullptr);
+    struct tm *timeinfo;
+    timeinfo = localtime(&now);
+
+    if (timeinfo->tm_year == 70) return;
+
+    ymdhm[YEAR]=String(timeinfo->tm_year + 1900, DEC);  // years since 1900
+    ymdhm[MONTH]=String(timeinfo->tm_mon + 1, DEC);     // months since January(0)
+    ymdhm[DATE]=String(timeinfo->tm_mday, DEC); 
+    ymdhm[HOUR]=String(timeinfo->tm_hour, DEC); 
+    ymdhm[MIN]=String(timeinfo->tm_min, DEC); 
+
+    //if(timeinfo->tm_min<10)      a[MIN]="0"+a[MIN];
+    if(timeinfo->tm_mon<10)      ymdhm[MONTH]="0" + ymdhm[MONTH];
+    if(timeinfo->tm_mday<10)     ymdhm[DATE]="0" + ymdhm[DATE];
+    if(timeinfo->tm_min<10)      ymdhm[MIN]="0" + ymdhm[MIN];
+    if(timeinfo->tm_hour<10)     ymdhm[HOUR]="0" + ymdhm[HOUR];
+
+    Serial.print(ymdhm[YEAR] + "/" +ymdhm[MONTH] + "/" + ymdhm[DATE] + " " + ymdhm[HOUR] + ":" + ymdhm[MIN] + "\n");
+  
     // call sensors.requestTemperatures() to issue a global temperature 
     // request to all devices on the bus
     Serial.print("Requesting temperatures...");
@@ -113,7 +150,11 @@ void loop(void)
     Serial.print(" Temp F: ");
     Serial.println(DallasTemperature::toFahrenheit(tempC)); // Converts tempC to Fahrenheit
 
+    aws_url += ("log?d=" + ymdhm[YEAR] + ymdhm[MONTH] + ymdhm[DATE]);
+    aws_url += ("&h=" + ymdhm[HOUR] + "&m=" + ymdhm[MIN] + "&t=" + String(tempC)); 
+
     // Write to my channel
+    Serial.print("*** Thinkspeak ***\n");
     Serial.print("[HTTP] begin...\n");
     if (http.begin(client, "http://api.thingspeak.com/update?api_key=KK59HDS3Q4NGWZ7P&field1=" + String(tempC))) {
 
@@ -141,10 +182,38 @@ void loop(void)
       Serial.printf("[HTTP} Unable to connect\n");
     }
 
-  }
+    // Write to my AWS server
+    Serial.print("*** AWS Server ***\n");
+    Serial.print("[HTTP] begin...\n");
+    if (http.begin(client, aws_url)) {
 
-  // Period: 1 minute
-  delay(60000);
+      Serial.print("[HTTP] GET...\n");
+      // start connection and send HTTP header
+      int httpCode = http.GET();
+
+      // httpCode will be negative on error
+      if (httpCode > 0) {
+        // HTTP header has been send and Server response header has been handled
+        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
+        // file found at server
+        if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+          String payload = http.getString();
+          Serial.println(payload);
+        }
+      } else {
+        Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+      }
+
+      http.end();
+    }
+    else {
+      Serial.printf("[HTTP} Unable to connect\n");
+    }
+
+    // Period: 1 minute
+    delay(60000);
+  }  
 }
 
 // function to print a device address
