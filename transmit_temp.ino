@@ -5,19 +5,13 @@
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
-#include <time.h>
+#include "account_info.h"
 
 ESP8266WiFiMulti WiFiMulti;
 
 // Data wire is plugged into port D2 on the Arduino
 #define ONE_WIRE_BUS D2
-
-#define TIMEZONE_SEOUL 9
-#define YEAR 0
-#define MONTH 1
-#define DATE 2
-#define HOUR 3
-#define MIN 4
+#define DS18B20 0
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
@@ -86,18 +80,10 @@ void setup(void)
   Serial.println();
 
   WiFi.mode(WIFI_STA);
-  WiFiMulti.addAP("iptime_rod", "temppw19");
+  WiFiMulti.addAP(MY_SSID, MY_PASSWD); // defined in 'account_info.h'
 
   Serial.print("Connecting to WiFi");
   while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    delay(1000);
-  }
-  Serial.println("...DONE");
-
-  configTime(TIMEZONE_SEOUL * 3600, 0, "pool.ntp.org", "time.nist.gov");
-  Serial.print("Waiting for time");
-  while (!time(nullptr)) {
     Serial.print(".");
     delay(1000);
   }
@@ -114,28 +100,8 @@ void loop(void)
     WiFiClient client;
     HTTPClient http;
     float tempC;
-
-    String ymdhm[5];
-    String aws_url = "http://ec2-52-78-98-155.ap-northeast-2.compute.amazonaws.com:9000/";
-    time_t now = time(nullptr);
-    struct tm *timeinfo;
-    timeinfo = localtime(&now);
-
-    if (timeinfo->tm_year == 70) return;
-
-    ymdhm[YEAR]=String(timeinfo->tm_year + 1900, DEC);  // years since 1900
-    ymdhm[MONTH]=String(timeinfo->tm_mon + 1, DEC);     // months since January(0)
-    ymdhm[DATE]=String(timeinfo->tm_mday, DEC); 
-    ymdhm[HOUR]=String(timeinfo->tm_hour, DEC); 
-    ymdhm[MIN]=String(timeinfo->tm_min, DEC); 
-
-    //if(timeinfo->tm_min<10)      a[MIN]="0"+a[MIN];
-    if(timeinfo->tm_mon<10)      ymdhm[MONTH]="0" + ymdhm[MONTH];
-    if(timeinfo->tm_mday<10)     ymdhm[DATE]="0" + ymdhm[DATE];
-    if(timeinfo->tm_min<10)      ymdhm[MIN]="0" + ymdhm[MIN];
-    if(timeinfo->tm_hour<10)     ymdhm[HOUR]="0" + ymdhm[HOUR];
-
-    Serial.print(ymdhm[YEAR] + "/" +ymdhm[MONTH] + "/" + ymdhm[DATE] + " " + ymdhm[HOUR] + ":" + ymdhm[MIN] + "\n");
+    int seq = -1;
+    String aws_url = HOST + ":" + String(PORT_NUM) + "/";
   
     // call sensors.requestTemperatures() to issue a global temperature 
     // request to all devices on the bus
@@ -150,13 +116,10 @@ void loop(void)
     Serial.print(" Temp F: ");
     Serial.println(DallasTemperature::toFahrenheit(tempC)); // Converts tempC to Fahrenheit
 
-    aws_url += ("log?d=" + ymdhm[YEAR] + ymdhm[MONTH] + ymdhm[DATE]);
-    aws_url += ("&h=" + ymdhm[HOUR] + "&m=" + ymdhm[MIN] + "&t=" + String(tempC)); 
-
     // Write to my channel
     Serial.print("*** Thinkspeak ***\n");
     Serial.print("[HTTP] begin...\n");
-    if (http.begin(client, "http://api.thingspeak.com/update?api_key=KK59HDS3Q4NGWZ7P&field1=" + String(tempC))) {
+    if (http.begin(client, "http://api.thingspeak.com/update?api_key=" + API_KEY + "&field1=" + String(tempC))) {
 
       Serial.print("[HTTP] GET...\n");
       // start connection and send HTTP header
@@ -171,6 +134,7 @@ void loop(void)
         if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
           String payload = http.getString();
           Serial.println(payload);
+          seq = payload.toInt();
         }
       } else {
         Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
@@ -181,6 +145,12 @@ void loop(void)
     else {
       Serial.printf("[HTTP} Unable to connect\n");
     }
+
+    if (seq < 0) return;
+ 
+    // log?device=202&unit=C&type=T&value=27.20&seq=0
+    aws_url += ("log?device=" + String(DS18B20) + "&unit=C&type=T");
+    aws_url += ("&value=" + String(tempC) + "&seq=" + String(seq)); 
 
     // Write to my AWS server
     Serial.print("*** AWS Server ***\n");
