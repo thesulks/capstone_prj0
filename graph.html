@@ -1,0 +1,44 @@
+<html>
+<head>
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <script type="text/javascript">
+      google.charts.load('current', {'packages':['line']});
+      google.charts.setOnLoadCallback(drawChart);
+    function drawChart() {
+      var data = new google.visualization.DataTable();
+      <%HEADER%>
+      data.addRows([
+        <%DATA%>
+      ]);
+      var options = {
+        chart: {
+          title: 'My room temperature! (by Dokyun KIM)',
+          subtitle: 'Server code : https://github.com/thesulks/capstone_prj0/blob/master/web_server.js\nArduino code : https://github.com/thesulks/capstone_prj0/blob/master/transmit_temp.ino',
+        },
+        width: 1024,
+        height: 512,
+        axes: {
+          x: {
+            0: {side: 'bottom'}
+          }
+        }
+      };
+      var chart = new google.charts.Line(document.getElementById('line_top_x'));
+      chart.draw(data, google.charts.Line.convertOptions(options));
+    }
+  </script>
+  <style>
+    a { text-decoration: none; color: gray; }
+    a:visited { text-decoration: none; }
+    a:hover { text-decoration: none; }
+    a:focus { text-decoration: none; }
+    a:hover, a:active { text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div id="line_top_x"></div>
+  <a href="https://github.com/thesulks/capstone_prj0/blob/master/web_server.js" target="_blank">Server code link (new window)</a>
+  <br>
+  <a href="https://github.com/thesulks/capstone_prj0/blob/master/transmit_temp.ino" target="_blank">Arduino code link (new window)</a>
+</body>
+</html>
